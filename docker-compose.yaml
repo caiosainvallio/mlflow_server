@@ -1,0 +1,57 @@
+version: "3"
+services:
+  postgres:
+    image: postgres:13
+    container_name: mlflow-postgres
+    environment:
+      - POSTGRES_USER=mlflow 
+      - POSTGRES_PASSWORD=mlflow 
+      - POSTGRES_DB=mlflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - mlflow-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: mlflow-minio
+    environment:
+      - MINIO_ROOT_USER=mlflow
+      - MINIO_ROOT_PASSWORD=mlflow123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - mlflow-network
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mlflow-server
+    depends_on:
+      - postgres
+      - minio
+    ports:
+      - "3000:3000"
+    environment:
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=mlflow
+      - AWS_SECRET_ACCESS_KEY=mlflow123
+      - MLFLOW_TRACKING_URI=postgresql://mlflow:mlflow@postgres:5432/mlflow
+      - BUCKET_NAME=mlflow
+    networks:
+      - mlflow-network
+
+networks:
+  mlflow-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  minio-data:
