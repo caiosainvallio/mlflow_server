@@ -1,0 +1,222 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mlflow
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: mlflow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-pvc
+  namespace: mlflow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mlflow-secrets
+  namespace: mlflow
+type: Opaque
+stringData:
+  POSTGRES_USER: mlflow
+  POSTGRES_PASSWORD: mlflow
+  MINIO_ROOT_USER: mlflow
+  MINIO_ROOT_PASSWORD: mlflow123
+  AWS_ACCESS_KEY_ID: mlflow
+  AWS_SECRET_ACCESS_KEY: mlflow123
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: mlflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:13
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: mlflow
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: postgres-storage
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: mlflow
+spec:
+  ports:
+    - port: 5432
+  selector:
+    app: postgres
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: mlflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-secrets
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-secrets
+                  key: MINIO_ROOT_PASSWORD
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          volumeMounts:
+            - mountPath: /data
+              name: minio-storage
+      volumes:
+        - name: minio-storage
+          persistentVolumeClaim:
+            claimName: minio-pvc
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: mlflow
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+    - name: console
+      port: 9001
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: mlflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      containers:
+        - name: mlflow
+          image: your-dockerhub-user/mlflow:latest # troque se necessário
+          ports:
+            - containerPort: 3000
+          env:
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: http://minio.mlflow.svc.cluster.local:9000
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-secrets
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mlflow-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: MLFLOW_TRACKING_URI
+              value: postgresql://mlflow:mlflow@postgres.mlflow.svc.cluster.local:5432/mlflow
+            - name: BUCKET_NAME
+              value: mlflow
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: mlflow
+spec:
+  selector:
+    app: mlflow
+  ports:
+    - port: 3000
+      targetPort: 3000
+  type: LoadBalancer
