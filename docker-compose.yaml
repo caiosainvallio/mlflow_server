@@ -1,4 +1,3 @@
-version: "3"
 services:
   postgres:
     image: postgres:13
@@ -21,8 +20,8 @@ services:
       - MINIO_ROOT_USER=mlflow
       - MINIO_ROOT_PASSWORD=mlflow123
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9010:9000"
+      - "9011:9001"
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
